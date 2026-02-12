@@ -8,7 +8,8 @@ from database import transactions
 app = Flask(__name__)
 CORS(app)
 
-# ---------------- AI LOGIC (DEFINE FIRST) ----------------
+
+# ---------------- AI LOGIC ----------------
 def generate_ai_suggestions(wallets):
     suggestions = []
 
@@ -19,151 +20,177 @@ def generate_ai_suggestions(wallets):
     emergency_ratio = (wallets["emergency"] / total) * 100
 
     if emergency_ratio < 20:
-        suggestions.append("Your emergency fund is low. Try saving at least 20%.")
+        suggestions.append("Emergency fund is low. Try saving at least 20%.")
 
     if wallets["normal"] < 0:
-        suggestions.append("You are overspending. Consider reducing non-essential expenses.")
+        suggestions.append("Overspending detected. Reduce non-essential expenses.")
 
     if wallets["cashback"] > wallets["normal"] * 0.3:
-        suggestions.append("Good cashback usage. Consider redirecting cashback to savings.")
+        suggestions.append("Good cashback usage. Redirect cashback to savings.")
 
     return suggestions
+
 
 # ---------------- HOME ----------------
 @app.route("/")
 def home():
-    return "Backend running"
+    return "Backend running successfully"
 
-# ---------------- MANUAL EXPENSE ADD ----------------
+
+# ---------------- ADD MANUAL EXPENSE ----------------
 @app.route("/add-expense", methods=["POST"])
 def add_expense():
-    data = request.get_json()
+    try:
+        data = request.get_json()
 
-    required = ["clerk_user_id", "amount", "category", "type"]
-    if not data or not all(k in data for k in required):
-        return jsonify({"error": "Missing fields"}), 400
+        required = ["clerk_user_id", "amount", "category", "type"]
+        if not data or not all(k in data for k in required):
+            return jsonify({"error": "Missing fields"}), 400
 
-    record = {
-        "clerk_user_id": data["clerk_user_id"],
-        "date": data.get("date"),
-        "description": data.get("description", ""),
-        "amount": float(data["amount"]),
-        "category": data["category"],
-        "type": data["type"],
-        "created_at": datetime.utcnow()
-    }
+        record = {
+            "clerk_user_id": data["clerk_user_id"],
+            "date": data.get("date"),
+            "description": data.get("description", ""),
+            "amount": float(data["amount"]),
+            "category": data["category"],
+            "type": data["type"],
+            "created_at": datetime.utcnow()
+        }
 
-    transactions.insert_one(record)
-    return jsonify({"message": "Expense added successfully"})
+        transactions.insert_one(record)
+
+        return jsonify({"message": "Expense added successfully"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 # ---------------- CSV UPLOAD ----------------
 @app.route("/upload", methods=["POST"])
 def upload_csv():
-    clerk_user_id = request.form.get("clerk_user_id")
-    file = request.files.get("file")
+    try:
+        clerk_user_id = request.form.get("clerk_user_id")
+        file = request.files.get("file")
 
-    if not clerk_user_id or not file:
-        return jsonify({"error": "Missing data"}), 400
+        if not clerk_user_id or not file:
+            return jsonify({"error": "clerk_user_id or file missing"}), 400
 
-    df = pd.read_csv(file)
+        df = pd.read_csv(file)
 
-    records = []
-    for _, row in df.iterrows():
-        records.append({
-            "clerk_user_id": clerk_user_id,
-            "date": row.get("date"),
-            "description": row.get("description", ""),
-            "amount": float(row.get("amount", 0)),
-            "category": row.get("category", "normal"),
-            "type": row.get("type", "debit"),
-            "created_at": datetime.utcnow()
+        records = []
+        for _, row in df.iterrows():
+            records.append({
+                "clerk_user_id": clerk_user_id,
+                "date": row.get("date"),
+                "description": row.get("description", ""),
+                "amount": float(row.get("amount", 0)),
+                "category": row.get("category", "normal"),
+                "type": row.get("type", "debit"),
+                "created_at": datetime.utcnow()
+            })
+
+        if records:
+            transactions.insert_many(records)
+
+        return jsonify({
+            "message": "CSV uploaded successfully",
+            "records_inserted": len(records)
         })
 
-    if records:
-        transactions.insert_many(records)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    return jsonify({
-        "message": "Upload successful",
-        "count": len(records)
-    })
 
-# ---------------- GET USER TRANSACTIONS ----------------
+# ---------------- GET TRANSACTIONS ----------------
 @app.route("/transactions/<clerk_user_id>", methods=["GET"])
 def get_transactions(clerk_user_id):
-    data = list(
-        transactions.find(
-            {"clerk_user_id": clerk_user_id},
-            {"_id": 0}
+    try:
+        data = list(
+            transactions.find(
+                {"clerk_user_id": clerk_user_id},
+                {"_id": 0}
+            )
         )
-    )
-    return jsonify(data)
+        return jsonify(data)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 # ---------------- WALLET SUMMARY ----------------
 @app.route("/wallets/<clerk_user_id>", methods=["GET"])
 def wallet_summary(clerk_user_id):
+    try:
+        pipeline = [
+            {"$match": {"clerk_user_id": clerk_user_id}},
+            {"$group": {
+                "_id": "$category",
+                "total": {"$sum": "$amount"}
+            }}
+        ]
 
-    pipeline = [
-        {"$match": {"clerk_user_id": clerk_user_id}},
-        {"$group": {
-            "_id": "$category",
-            "total": {"$sum": "$amount"}
-        }}
-    ]
+        result = transactions.aggregate(pipeline)
 
-    result = transactions.aggregate(pipeline)
+        wallets = {
+            "normal": 0,
+            "cashback": 0,
+            "emergency": 0
+        }
 
-    wallets = {
-        "normal": 0,
-        "cashback": 0,
-        "emergency": 0
-    }
+        for r in result:
+            category = str(r["_id"]).lower()
+            if "cashback" in category:
+                wallets["cashback"] += r["total"]
+            elif "emergency" in category:
+                wallets["emergency"] += r["total"]
+            else:
+                wallets["normal"] += r["total"]
 
-    for r in result:
-        category = str(r["_id"]).lower()
-        if "cashback" in category:
-            wallets["cashback"] += r["total"]
-        elif "emergency" in category:
-            wallets["emergency"] += r["total"]
-        else:
-            wallets["normal"] += r["total"]
+        return jsonify(wallets)
 
-    return jsonify(wallets)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 # ---------------- AI SUGGESTIONS ----------------
 @app.route("/ai-suggestions/<clerk_user_id>", methods=["GET"])
 def ai_suggestions(clerk_user_id):
+    try:
+        pipeline = [
+            {"$match": {"clerk_user_id": clerk_user_id}},
+            {"$group": {
+                "_id": "$category",
+                "total": {"$sum": "$amount"}
+            }}
+        ]
 
-    pipeline = [
-        {"$match": {"clerk_user_id": clerk_user_id}},
-        {"$group": {
-            "_id": "$category",
-            "total": {"$sum": "$amount"}
-        }}
-    ]
+        result = transactions.aggregate(pipeline)
 
-    result = transactions.aggregate(pipeline)
+        wallets = {
+            "normal": 0,
+            "cashback": 0,
+            "emergency": 0
+        }
 
-    wallets = {
-        "normal": 0,
-        "cashback": 0,
-        "emergency": 0
-    }
+        for r in result:
+            category = str(r["_id"]).lower()
+            if "cashback" in category:
+                wallets["cashback"] += r["total"]
+            elif "emergency" in category:
+                wallets["emergency"] += r["total"]
+            else:
+                wallets["normal"] += r["total"]
 
-    for r in result:
-        category = str(r["_id"]).lower()
-        if "cashback" in category:
-            wallets["cashback"] += r["total"]
-        elif "emergency" in category:
-            wallets["emergency"] += r["total"]
-        else:
-            wallets["normal"] += r["total"]
+        suggestions = generate_ai_suggestions(wallets)
 
-    suggestions = generate_ai_suggestions(wallets)
+        return jsonify({
+            "wallets": wallets,
+            "suggestions": suggestions
+        })
 
-    return jsonify({
-        "wallets": wallets,
-        "suggestions": suggestions
-    })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 # ---------------- RUN ----------------
 if __name__ == "__main__":
