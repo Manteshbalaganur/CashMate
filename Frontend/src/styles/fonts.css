@@ -1,0 +1,10 @@
+/* fonts.css - placeholder to stop empty warning */
+@font-face {
+  font-family: 'Placeholder';
+  src: url('../fonts/placeholder.woff2') format('woff2'); /* or just leave empty but not blank file */
+}
+
+/* Or minimal */
+body {
+  font-family: system-ui, sans-serif;
+}

@@ -7,8 +7,24 @@ from database import transactions
 # ---------------- APP INIT ----------------
 app = Flask(__name__)
 CORS(app)
+from flask import jsonify
 
+from flask_cors import CORS
 
+# Right after app = Flask(__name__)
+CORS(app, resources={r"/api/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173"]}})
+# or for dev only: CORS(app)  # allows all origins (less secure, ok for local)
+
+from flask import jsonify
+
+@app.route('/test', methods=['GET'])
+@app.route('/api/test', methods=['GET'])  # also support /api prefix
+def test():
+    return jsonify({
+        "status": "ok",
+        "message": "Backend connected! Ready for frontend calls.",
+        "date": "2026-02-14"
+    })
 # ---------------- AI LOGIC ----------------
 def generate_ai_suggestions(wallets):
     suggestions = []
@@ -193,5 +209,7 @@ def ai_suggestions(clerk_user_id):
 
 
 # ---------------- RUN ----------------
+# if __name__ == "__main__":
+#     app.run(debug=True)
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, use_reloader=False)  # ← add use_reloader=False

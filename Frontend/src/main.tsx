@@ -3,6 +3,9 @@ import { ClerkProvider } from "@clerk/clerk-react";
 import { BrowserRouter } from "react-router-dom";   // ⭐ ADD THIS
 import App from "./app/App.tsx";
 import "./styles/index.css";
+import "./styles/tailwind.css";
+import "./styles/theme.css";
+
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
